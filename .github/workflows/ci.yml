@@ -1,0 +1,43 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
+
+      - name: gofmt
+        run: test -z "$(gofmt -l ./cmd ./internal)"
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      - name: shell syntax
+        run: |
+          for f in scripts/*.sh; do
+            bash -n "$f"
+          done
+
+      - name: build amd64
+        run: ./scripts/build.sh
+
+      - name: build arm64
+        run: ARCH=arm64 OUT=dist/alt-shift-ime-arm64 ./scripts/build.sh
+
+      - name: package
+        run: ./scripts/package.sh v0.0.0-ci
