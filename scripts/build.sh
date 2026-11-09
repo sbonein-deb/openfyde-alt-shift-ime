@@ -13,7 +13,8 @@ OUT="${OUT:-dist/alt-shift-ime}"
 mkdir -p "$(dirname "$OUT")"
 
 CGO_ENABLED=0 GOOS=linux GOARCH="$ARCH" \
-  go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
+  go build -trimpath -buildvcs=false \
+  -ldflags "-s -w -X main.version=${VERSION}" \
   -o "$OUT" ./cmd/alt-shift-ime
 
 echo "built $OUT (${VERSION}, linux/${ARCH})"

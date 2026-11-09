@@ -55,9 +55,11 @@ pick_file() {
 }
 
 if [ -z "${BINARY:-}" ]; then
+  # Prefer the file next to this script: release tarballs ship the binary and
+  # the installer in the same directory. Fall back to a repository checkout.
   BINARY=$(pick_file \
-    "$SCRIPT_DIR/../dist/alt-shift-ime" \
     "$SCRIPT_DIR/alt-shift-ime" \
+    "$SCRIPT_DIR/../dist/alt-shift-ime" \
     "$SCRIPT_DIR/../alt-shift-ime" \
     "$DESTDIR/alt-shift-ime" \
     "$BINDIR/alt-shift-ime") || {
@@ -71,13 +73,13 @@ if [ ! -f "$BINARY" ]; then
 fi
 
 CONFIG_SRC=$(pick_file \
-  "$SCRIPT_DIR/../config/alt-shift-ime.conf" \
   "$SCRIPT_DIR/alt-shift-ime.conf" \
+  "$SCRIPT_DIR/../config/alt-shift-ime.conf" \
   "$DESTDIR/alt-shift-ime.conf") || CONFIG_SRC=
 
 JOB_SRC=$(pick_file \
-  "$SCRIPT_DIR/../init/alt-shift-ime.conf" \
   "$SCRIPT_DIR/alt-shift-ime.upstart.conf" \
+  "$SCRIPT_DIR/../init/alt-shift-ime.conf" \
   "$DESTDIR/alt-shift-ime.upstart.conf") || {
   echo "cannot find the upstart job file" >&2
   exit 1
