@@ -19,7 +19,7 @@ import (
 	"github.com/sbonein-deb/openfyde-alt-shift-ime/internal/uinput"
 )
 
-var version = "0.2.0-dev"
+var version = "0.3.0-dev"
 
 const defaultConfigPath = "/usr/local/etc/alt-shift-ime.conf"
 const defaultLockPath = "/run/alt-shift-ime.lock"

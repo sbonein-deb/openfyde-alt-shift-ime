@@ -50,13 +50,14 @@ why `Alt+Shift+Tab` does not switch layouts.
 - Triggers after the modifiers are released, with an 80 ms delay by default.
 - Preserves the standard `Search+Space` shortcut.
 - Watches every keyboard that advertises left Alt and left Shift.
-- Picks up external USB keyboards on hotplug without a restart.
+- Picks up external USB keyboards on hotplug without a restart (verified with
+  physical hardware).
 - Single-instance `flock`; a second daemon or `selftest` refuses to run.
 - Resets detector state and cancels a pending injection if a keyboard is
   unplugged mid-chord.
 - Static Go binary for `amd64` and `arm64`; no runtime dependencies.
 - Diagnostic commands: `probe`, `inject`, `selftest`.
-- Upstart job, installer, restore-after-update and uninstall scripts.
+- Upstart job, installer, automatic post-update recovery and uninstall scripts.
 
 ## Requirements
 
@@ -75,13 +76,13 @@ verify it, and run the installer as root:
 
 ```bash
 cd /tmp
-curl -fsSLO https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/download/v0.2.0/alt-shift-ime_0.2.0_linux_amd64.tar.gz
-curl -fsSLO https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/download/v0.2.0/checksums.txt
+curl -fsSLO https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/download/v0.3.0/alt-shift-ime_0.3.0_linux_amd64.tar.gz
+curl -fsSLO https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/download/v0.3.0/checksums.txt
 sha256sum -c checksums.txt --ignore-missing
 
 rm -rf /tmp/alt-shift-ime-install
 mkdir -p /tmp/alt-shift-ime-install
-tar xzf alt-shift-ime_0.2.0_linux_amd64.tar.gz -C /tmp/alt-shift-ime-install --strip-components=1
+tar xzf alt-shift-ime_0.3.0_linux_amd64.tar.gz -C /tmp/alt-shift-ime-install --strip-components=1
 bash /tmp/alt-shift-ime-install/setup-alt-shift-ime.sh
 ```
 
@@ -94,8 +95,9 @@ The installer:
 - installs `/usr/local/bin/alt-shift-ime`;
 - installs `/usr/local/etc/alt-shift-ime.conf` if it does not exist;
 - installs the Upstart job `/etc/init/alt-shift-ime.conf`;
-- stores restore copies under `/usr/local/lib/alt-shift-ime/`;
-- reloads Upstart and starts the daemon.
+- installs the udev rule `/usr/local/lib/udev/rules.d/99-alt-shift-ime.rules`;
+- stores restore and boot-recovery copies under `/usr/local/lib/alt-shift-ime/`;
+- reloads udev and Upstart, then starts the daemon.
 
 It is safe to run again.
 
@@ -113,7 +115,7 @@ tail -n 20 /var/log/alt-shift-ime.log
 A healthy start looks like this:
 
 ```
-alt-shift-ime 0.2.0 starting: combo=ctrl+space delay=80ms rescan=2s dry_run=false verbose=false
+alt-shift-ime 0.3.0 starting: combo=ctrl+space delay=80ms rescan=2s dry_run=false verbose=false
 config: /usr/local/etc/alt-shift-ime.conf
 lock acquired: /run/alt-shift-ime.lock
 created "alt-shift-ime virtual keyboard", warming up 700ms
@@ -183,8 +185,26 @@ daemon and takes the same single-instance lock.
 ## Restore after a ChromeOS update
 
 ChromeOS updates replace the root filesystem, so `/etc/init/alt-shift-ime.conf`
-disappears. `/usr/local` lives on the stateful partition and survives. Restore
-the job with:
+disappears. `/usr/local` lives on the stateful partition and survives.
+
+Recovery is automatic. The installed udev rule in
+`/usr/local/lib/udev/rules.d/` runs `boot-restore.sh` during the normal boot
+device trigger. When the Upstart job is missing, the hook:
+
+1. starts the daemon directly from `/usr/local/bin`;
+2. waits for boot to settle and installs the Upstart job for the next boot;
+3. stops the directly started daemon and starts it under Upstart.
+
+No manual step and no extra reboot are required. The hook runs at most once per
+boot and does nothing when the job already exists.
+
+Check the automatic recovery log with:
+
+```bash
+cat /var/log/alt-shift-ime-restore.log
+```
+
+Manual fallback, if the hook did not run:
 
 ```bash
 bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
@@ -199,8 +219,10 @@ daemon. A reboot is not required.
 bash /usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh
 ```
 
-This stops the daemon and removes the binary and Upstart job, keeping the
-configuration and restore copies. Add `--purge` to remove everything:
+This stops the daemon, removes the binary, the Upstart job and the udev rule,
+and leaves a `disabled` marker so automatic recovery cannot reinstall the job.
+It keeps the configuration and restore copies. Add `--purge` to remove
+everything:
 
 ```bash
 bash /usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh --purge
@@ -224,7 +246,7 @@ ARCH=arm64 OUT=dist/alt-shift-ime-arm64 ./scripts/build.sh
 Create release tarballs and checksums:
 
 ```bash
-./scripts/package.sh v0.2.0
+./scripts/package.sh v0.3.0
 ls dist/release/
 ```
 
@@ -255,12 +277,10 @@ Russian versions: [docs/INSTALL.ru.md](docs/INSTALL.ru.md),
 - Only the Upstart-based OpenFyde/ChromeOS boot is supported. There is no
   systemd unit.
 - Right Alt and right Shift are intentionally ignored.
-- The external-keyboard hotplug path is implemented and unit-tested at the
-  detector/device level, but at the time of the first release it had not been
-  verified with physical external hardware.
 - Key names in `combo` are positional evdev key codes, not layout-dependent
   characters.
-- ChromeOS updates require running the restore script (or reinstalling).
+- Automatic recovery assumes `/usr/local` survives the update. If it does not,
+  reinstall from the release tarball.
 
 ## License
 

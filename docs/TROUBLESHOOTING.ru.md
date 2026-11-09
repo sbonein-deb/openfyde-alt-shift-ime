@@ -37,8 +37,17 @@ initctl start alt-shift-ime
 Upstart-job отсутствует. Это ожидаемо после обновления ChromeOS или после
 удаления.
 
+Автоматическое восстановление должно вернуть его при загрузке. Проверьте:
+
 ```bash
 ls -l /etc/init/alt-shift-ime.conf
+cat /var/log/alt-shift-ime-restore.log
+ls -l /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
+```
+
+Ручной fallback:
+
+```bash
 bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
 ```
 
@@ -212,19 +221,93 @@ tail -n 20 /var/log/alt-shift-ime.log
 - помните: клавиатура должна объявлять и `KEY_LEFTALT`, и `KEY_LEFTSHIFT` на
   одном event-узле.
 
-Первый релиз реализовал этот путь, но готовился без физического внешнего
-железа. При проблеме приложите вывод `probe --all` и лог демона.
+Hotplug проверен на физическом внешнем USB-железе. Если конкретная клавиатура
+всё равно не работает, приложите вывод `probe --all` и лог демона.
 
 ## После обновления ChromeOS
 
-Job в `/etc/init` исчез, но `/usr/local` уцелел:
+Job в `/etc/init` исчез, но `/usr/local` уцелел. udev-хук должен восстановить
+его автоматически:
+
+```bash
+cat /var/log/alt-shift-ime-restore.log
+initctl status alt-shift-ime
+```
+
+Ожидаемая последовательность в логе:
+
+```
+== ... boot restore helper started
+== installing the Upstart job for the next boot
+== reloading Upstart
+== stopping directly started daemon pid ...
+== starting alt-shift-ime under Upstart
+alt-shift-ime start/running, process ...
+```
+
+Если лог отсутствует или пуст:
+
+1. проверьте, что правило на месте:
+
+   ```bash
+   ls -l /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
+   ```
+
+2. проверьте, что скрипты хука на месте:
+
+   ```bash
+   ls -l /usr/local/lib/alt-shift-ime/boot-restore*.sh
+   ```
+
+3. проверьте маркер «один раз за загрузку». Это tmpfs-файл, он должен исчезать
+   после перезагрузки:
+
+   ```bash
+   ls -l /run/alt-shift-ime-boot-hook
+   ```
+
+4. переустановите, если чего-то не хватает. Затем запустите ручной fallback:
+
+   ```bash
+   bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
+   ```
+
+Если `/usr/local/lib/alt-shift-ime/` тоже пропал, переустановите из
+release-tarball.
+
+### Демон запускается напрямую, но не переходит под Upstart
+
+Проверьте лог helper и процессы:
+
+```bash
+cat /var/log/alt-shift-ime-restore.log
+ps aux | grep -E 'alt-shift-ime|boot-restore'
+ls -ld /run/alt-shift-ime-boot-helper.lock
+```
+
+Helper ждёт завершения загрузки до 60 секунд и ещё 10 секунд. Если его убили,
+перезагрузитесь или выполните:
 
 ```bash
 bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
 ```
 
-Если `/usr/local/lib/alt-shift-ime/` тоже пропал, переустановите из
-release-tarball.
+### Хук восстанавливает демон после удаления
+
+Uninstaller удаляет udev-правило и создаёт
+`/usr/local/lib/alt-shift-ime/disabled`. Проверьте, что произошло и то и другое:
+
+```bash
+ls -l /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
+ls -l /usr/local/lib/alt-shift-ime/disabled
+```
+
+Если правило всё ещё на месте, удалите его и перезагрузите udev:
+
+```bash
+rm -f /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
+udevadm control --reload-rules
+```
 
 ## AVC-отказы SELinux
 

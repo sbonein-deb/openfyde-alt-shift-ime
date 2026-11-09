@@ -25,7 +25,7 @@
 Set `VERSION` and `ARCH` to the values you need:
 
 ```bash
-VERSION=0.2.0
+VERSION=0.3.0
 ARCH=amd64   # or arm64
 
 cd /tmp
@@ -69,7 +69,7 @@ install -m 0755 alt-shift-ime /usr/local/bin/alt-shift-ime
 install -m 0644 alt-shift-ime.conf /usr/local/etc/alt-shift-ime.conf
 install -m 0644 alt-shift-ime.upstart.conf /etc/init/alt-shift-ime.conf
 
-mkdir -p /usr/local/lib/alt-shift-ime
+mkdir -p /usr/local/lib/alt-shift-ime /usr/local/lib/udev/rules.d
 install -m 0644 alt-shift-ime.upstart.conf \
   /usr/local/lib/alt-shift-ime/alt-shift-ime.upstart.conf
 install -m 0644 alt-shift-ime.conf \
@@ -80,8 +80,16 @@ install -m 0755 restore-alt-shift-ime.sh \
   /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
 install -m 0755 uninstall-alt-shift-ime.sh \
   /usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh
+install -m 0755 boot-restore.sh \
+  /usr/local/lib/alt-shift-ime/boot-restore.sh
+install -m 0755 boot-restore-late.sh \
+  /usr/local/lib/alt-shift-ime/boot-restore-late.sh
+install -m 0644 99-alt-shift-ime.rules \
+  /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
 
-restorecon -v /usr/local/bin/alt-shift-ime /etc/init/alt-shift-ime.conf || true
+restorecon -v /usr/local/bin/alt-shift-ime /etc/init/alt-shift-ime.conf \
+  /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules || true
+udevadm control --reload-rules
 initctl reload-configuration
 initctl start alt-shift-ime
 
@@ -126,7 +134,27 @@ initctl status alt-shift-ime
 ## Restore after a ChromeOS update
 
 ChromeOS updates replace the root filesystem, so `/etc/init/alt-shift-ime.conf`
-is lost. The binary, config and restore copies under `/usr/local` survive.
+is lost. The binary, config, udev rule and restore copies under `/usr/local`
+survive.
+
+Recovery is automatic. The udev rule
+`/usr/local/lib/udev/rules.d/99-alt-shift-ime.rules` runs
+`/usr/local/lib/alt-shift-ime/boot-restore.sh` during the normal boot device
+trigger:
+
+1. If `/etc/init/alt-shift-ime.conf` exists, the hook marks the boot as handled
+   and Upstart starts the job normally.
+2. If the job is missing and the install is not disabled, the hook starts the
+   daemon directly with `/usr/local/bin/alt-shift-ime run`.
+3. `boot-restore-late.sh` waits for boot to settle, installs the Upstart job
+   with `restore-alt-shift-ime.sh --install-only`, reloads Upstart, stops the
+   directly started daemon and starts the job under Upstart.
+
+The hook runs at most once per boot (`/run/alt-shift-ime-boot-hook`) and logs to
+`/var/log/alt-shift-ime-restore.log`. No manual step and no extra reboot are
+required.
+
+Manual fallback:
 
 ```bash
 bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
@@ -142,7 +170,30 @@ The script:
 5. starts or restarts the daemon;
 6. remounts `/` read-only.
 
+`--install-only` performs steps 1–3 and 6 only; the automatic recovery helper
+uses it.
+
 No reboot is required.
+
+## Test the automatic recovery
+
+To simulate an update without reinstalling the system:
+
+```bash
+initctl stop alt-shift-ime
+rm -f /etc/init/alt-shift-ime.conf
+rm -f /run/alt-shift-ime-boot-hook
+udevadm trigger --action=add --subsystem-match=block --sysname-match=sda
+```
+
+Adjust `sda` if your root disk has a different name. Then check:
+
+```bash
+cat /var/log/alt-shift-ime-restore.log
+initctl status alt-shift-ime
+```
+
+The log should show the direct start followed by the takeover under Upstart.
 
 ## Uninstall
 
@@ -151,6 +202,10 @@ Keep config and restore copies:
 ```bash
 bash /usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh
 ```
+
+This stops the daemon, removes the binary, Upstart job and udev rule, and
+creates `/usr/local/lib/alt-shift-ime/disabled` so the boot hook cannot restore
+the job.
 
 Remove everything:
 
@@ -181,13 +236,18 @@ installer. No network access is needed on the host.
 | `/usr/local/bin/alt-shift-ime` | Static binary. |
 | `/usr/local/etc/alt-shift-ime.conf` | Configuration. |
 | `/etc/init/alt-shift-ime.conf` | Upstart job. |
+| `/usr/local/lib/udev/rules.d/99-alt-shift-ime.rules` | Boot-time recovery hook. |
 | `/usr/local/lib/alt-shift-ime/alt-shift-ime.upstart.conf` | Restore copy of the job. |
 | `/usr/local/lib/alt-shift-ime/alt-shift-ime.conf` | Restore copy of the config. |
 | `/usr/local/lib/alt-shift-ime/setup-alt-shift-ime.sh` | Installer copy. |
 | `/usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh` | Post-update restore. |
 | `/usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh` | Uninstaller copy. |
+| `/usr/local/lib/alt-shift-ime/boot-restore.sh` | udev boot hook. |
+| `/usr/local/lib/alt-shift-ime/boot-restore-late.sh` | Job installation and Upstart takeover. |
 | `/var/log/alt-shift-ime.log` | Daemon log. |
+| `/var/log/alt-shift-ime-restore.log` | Automatic recovery log. |
 | `/run/alt-shift-ime.lock` | Single-instance lock. |
+| `/run/alt-shift-ime-boot-hook` | Once-per-boot marker. |
 
 ## Build and install from source
 
@@ -208,5 +268,5 @@ BINARY=/tmp/alt-shift-ime bash setup-alt-shift-ime.sh
 Or build the release tarballs locally:
 
 ```bash
-./scripts/package.sh v0.2.0
+./scripts/package.sh v0.3.0
 ```

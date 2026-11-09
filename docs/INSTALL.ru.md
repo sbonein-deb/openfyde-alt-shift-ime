@@ -25,7 +25,7 @@
 Задайте нужные `VERSION` и `ARCH`:
 
 ```bash
-VERSION=0.2.0
+VERSION=0.3.0
 ARCH=amd64   # или arm64
 
 cd /tmp
@@ -69,7 +69,7 @@ install -m 0755 alt-shift-ime /usr/local/bin/alt-shift-ime
 install -m 0644 alt-shift-ime.conf /usr/local/etc/alt-shift-ime.conf
 install -m 0644 alt-shift-ime.upstart.conf /etc/init/alt-shift-ime.conf
 
-mkdir -p /usr/local/lib/alt-shift-ime
+mkdir -p /usr/local/lib/alt-shift-ime /usr/local/lib/udev/rules.d
 install -m 0644 alt-shift-ime.upstart.conf \
   /usr/local/lib/alt-shift-ime/alt-shift-ime.upstart.conf
 install -m 0644 alt-shift-ime.conf \
@@ -80,8 +80,16 @@ install -m 0755 restore-alt-shift-ime.sh \
   /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
 install -m 0755 uninstall-alt-shift-ime.sh \
   /usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh
+install -m 0755 boot-restore.sh \
+  /usr/local/lib/alt-shift-ime/boot-restore.sh
+install -m 0755 boot-restore-late.sh \
+  /usr/local/lib/alt-shift-ime/boot-restore-late.sh
+install -m 0644 99-alt-shift-ime.rules \
+  /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
 
-restorecon -v /usr/local/bin/alt-shift-ime /etc/init/alt-shift-ime.conf || true
+restorecon -v /usr/local/bin/alt-shift-ime /etc/init/alt-shift-ime.conf \
+  /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules || true
+udevadm control --reload-rules
 initctl reload-configuration
 initctl start alt-shift-ime
 
@@ -126,8 +134,28 @@ initctl status alt-shift-ime
 ## Восстановление после обновления ChromeOS
 
 Обновление ChromeOS заменяет root-раздел, поэтому
-`/etc/init/alt-shift-ime.conf` теряется. Бинарник, конфиг и restore-копии в
-`/usr/local` переживают обновление.
+`/etc/init/alt-shift-ime.conf` теряется. Бинарник, конфиг, udev-правило и
+restore-копии в `/usr/local` переживают обновление.
+
+Восстановление автоматическое. udev-правило
+`/usr/local/lib/udev/rules.d/99-alt-shift-ime.rules` запускает
+`/usr/local/lib/alt-shift-ime/boot-restore.sh` во время штатного boot-триггера
+устройств:
+
+1. Если `/etc/init/alt-shift-ime.conf` существует, хук помечает загрузку
+   обработанной, и Upstart запускает job как обычно.
+2. Если job отсутствует и установка не отключена, хук запускает демон напрямую
+   через `/usr/local/bin/alt-shift-ime run`.
+3. `boot-restore-late.sh` ждёт завершения загрузки, ставит Upstart-job через
+   `restore-alt-shift-ime.sh --install-only`, перезагружает Upstart,
+   останавливает напрямую запущенный демон и запускает job под Upstart.
+
+Хук срабатывает не более одного раза за загрузку
+(`/run/alt-shift-ime-boot-hook`) и пишет в
+`/var/log/alt-shift-ime-restore.log`. Ручные действия и дополнительная
+перезагрузка не нужны.
+
+Ручной fallback:
 
 ```bash
 bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
@@ -143,7 +171,30 @@ bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
 5. запускает или перезапускает демон;
 6. возвращает `/` в read-only.
 
+`--install-only` выполняет только шаги 1–3 и 6; его использует helper
+автоматического восстановления.
+
 Перезагрузка не нужна.
+
+## Проверка автоматического восстановления
+
+Чтобы сымитировать обновление без переустановки системы:
+
+```bash
+initctl stop alt-shift-ime
+rm -f /etc/init/alt-shift-ime.conf
+rm -f /run/alt-shift-ime-boot-hook
+udevadm trigger --action=add --subsystem-match=block --sysname-match=sda
+```
+
+Замените `sda`, если корневой диск называется иначе. Затем проверьте:
+
+```bash
+cat /var/log/alt-shift-ime-restore.log
+initctl status alt-shift-ime
+```
+
+В логе должен быть прямой запуск, а затем takeover под Upstart.
 
 ## Удаление
 
@@ -152,6 +203,10 @@ bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
 ```bash
 bash /usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh
 ```
+
+Скрипт останавливает демон, удаляет бинарник, Upstart-job и udev-правило и
+создаёт `/usr/local/lib/alt-shift-ime/disabled`, чтобы boot-хук не восстановил
+job.
 
 Удалить всё:
 
@@ -181,13 +236,18 @@ bash /usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh --purge
 | `/usr/local/bin/alt-shift-ime` | Статический бинарник. |
 | `/usr/local/etc/alt-shift-ime.conf` | Конфигурация. |
 | `/etc/init/alt-shift-ime.conf` | Upstart-job. |
+| `/usr/local/lib/udev/rules.d/99-alt-shift-ime.rules` | Хук восстановления при загрузке. |
 | `/usr/local/lib/alt-shift-ime/alt-shift-ime.upstart.conf` | Restore-копия job. |
 | `/usr/local/lib/alt-shift-ime/alt-shift-ime.conf` | Restore-копия конфига. |
 | `/usr/local/lib/alt-shift-ime/setup-alt-shift-ime.sh` | Копия installer. |
 | `/usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh` | Restore после обновления. |
 | `/usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh` | Копия uninstaller. |
+| `/usr/local/lib/alt-shift-ime/boot-restore.sh` | udev-хук загрузки. |
+| `/usr/local/lib/alt-shift-ime/boot-restore-late.sh` | Установка job и takeover под Upstart. |
 | `/var/log/alt-shift-ime.log` | Лог демона. |
+| `/var/log/alt-shift-ime-restore.log` | Лог автоматического восстановления. |
 | `/run/alt-shift-ime.lock` | Single-instance lock. |
+| `/run/alt-shift-ime-boot-hook` | Маркер «один раз за загрузку». |
 
 ## Сборка и установка из исходников
 
@@ -208,5 +268,5 @@ BINARY=/tmp/alt-shift-ime bash setup-alt-shift-ime.sh
 Или соберите release-tarball локально:
 
 ```bash
-./scripts/package.sh v0.2.0
+./scripts/package.sh v0.3.0
 ```

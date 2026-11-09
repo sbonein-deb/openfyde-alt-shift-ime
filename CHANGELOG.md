@@ -4,6 +4,31 @@ All notable changes to this project are documented in this file. The format is
 based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and this
 project uses [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] - 2026-11-09
+
+### Added
+
+- Automatic recovery after a ChromeOS update. A udev rule in
+  `/usr/local/lib/udev/rules.d/` runs `boot-restore.sh` during boot. If the
+  Upstart job is missing, the hook starts the daemon directly, installs the job
+  for the next boot in the background, and moves the running daemon back under
+  Upstart.
+- `restore-alt-shift-ime.sh --install-only` installs the job and config without
+  reloading Upstart or starting the daemon.
+- Installer installs the udev rule and the boot-recovery scripts, clears the
+  uninstall sentinel and reloads udev rules.
+- Uninstaller removes the udev rule, creates a `disabled` sentinel, stops a
+  directly started daemon and terminates a running recovery helper.
+- `/var/log/alt-shift-ime-restore.log` for automatic recovery diagnostics.
+
+### Changed
+
+- Version bumped to `0.3.0`.
+
+### Verified
+
+- External USB keyboard and hotplug were verified with physical hardware.
+
 ## [0.2.0] - 2026-11-09
 
 First public release.
@@ -50,4 +75,5 @@ Internal Phase 0 prototype, not publicly released.
 - Initial `evdev`, `uinput`, `chord` and `keycombo` packages.
 - Host verification: RU/US switching, `Search+Space`, `Alt+Shift+Tab`, AVC.
 
+[0.3.0]: https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/tag/v0.3.0
 [0.2.0]: https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/tag/v0.2.0

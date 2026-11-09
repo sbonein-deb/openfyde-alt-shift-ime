@@ -1,8 +1,8 @@
 #!/bin/sh
 # Build release tarballs and checksums.
 #
-#   ./scripts/package.sh v0.2.0
-#   VERSION=0.2.0 ARCHES="amd64 arm64" ./scripts/package.sh
+#   ./scripts/package.sh v0.3.0
+#   VERSION=0.3.0 ARCHES="amd64 arm64" ./scripts/package.sh
 #
 # The resulting files are written to dist/release/.
 set -eu
@@ -31,11 +31,14 @@ for arch in $ARCHES; do
   cp scripts/setup-alt-shift-ime.sh "$stage/"
   cp scripts/restore-alt-shift-ime.sh "$stage/"
   cp scripts/uninstall-alt-shift-ime.sh "$stage/"
+  cp scripts/boot-restore.sh "$stage/"
+  cp scripts/boot-restore-late.sh "$stage/"
+  cp udev/99-alt-shift-ime.rules "$stage/"
   cp README.md README.ru.md CHANGELOG.md LICENSE "$stage/"
   cp docs/*.md "$stage/docs/"
 
   chmod 0755 "$stage/alt-shift-ime" "$stage"/*.sh
-  chmod 0644 "$stage"/*.conf "$stage"/*.md "$stage"/docs/*.md
+  chmod 0644 "$stage"/*.conf "$stage"/*.md "$stage"/docs/*.md "$stage/99-alt-shift-ime.rules"
 
   tar -C "$STAGE_ROOT" -czf "$OUTDIR/$name.tar.gz" "$name"
   echo "== packaged $OUTDIR/$name.tar.gz"

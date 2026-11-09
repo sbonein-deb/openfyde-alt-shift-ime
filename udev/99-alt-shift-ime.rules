@@ -1,0 +1,10 @@
+# Boot-time recovery for alt-shift-ime.
+#
+# /usr/local survives ChromeOS updates; /etc/init does not.  When the Upstart
+# job is missing, boot-restore.sh starts the daemon directly and schedules
+# boot-restore-late.sh to install the job for the next boot.
+#
+# The block rules run during the normal udev trigger after /usr/local and /var
+# are mounted.  The input rule also covers keyboards plugged in later.
+ACTION=="add", SUBSYSTEM=="block", RUN+="/bin/bash /usr/local/lib/alt-shift-ime/boot-restore.sh"
+ACTION=="add", SUBSYSTEM=="input", KERNEL=="event*", RUN+="/bin/bash /usr/local/lib/alt-shift-ime/boot-restore.sh"

@@ -37,8 +37,17 @@ initctl start alt-shift-ime
 The Upstart job is missing. This is expected after a ChromeOS update, or after
 an uninstall.
 
+Automatic recovery should restore it during boot. Check:
+
 ```bash
 ls -l /etc/init/alt-shift-ime.conf
+cat /var/log/alt-shift-ime-restore.log
+ls -l /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
+```
+
+Manual fallback:
+
+```bash
 bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
 ```
 
@@ -210,20 +219,93 @@ The log should show a new `watching ...` line. If not:
 - remember that a keyboard must advertise both `KEY_LEFTALT` and
   `KEY_LEFTSHIFT` on the same event node.
 
-The first release implemented this path but was produced without physical
-external keyboard hardware, so report issues with `probe --all` output and the
-daemon log.
+Hotplug has been verified with physical external USB hardware. If a specific
+keyboard still fails, report `probe --all` output and the daemon log.
 
 ## After a ChromeOS update
 
-The job in `/etc/init` is gone, but `/usr/local` survived:
+The job in `/etc/init` is gone, but `/usr/local` survived. The udev hook should
+recover it automatically:
+
+```bash
+cat /var/log/alt-shift-ime-restore.log
+initctl status alt-shift-ime
+```
+
+Expected sequence in the log:
+
+```
+== ... boot restore helper started
+== installing the Upstart job for the next boot
+== reloading Upstart
+== stopping directly started daemon pid ...
+== starting alt-shift-ime under Upstart
+alt-shift-ime start/running, process ...
+```
+
+If the log is missing or empty:
+
+1. check that the rule exists:
+
+   ```bash
+   ls -l /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
+   ```
+
+2. check that the hook scripts exist:
+
+   ```bash
+   ls -l /usr/local/lib/alt-shift-ime/boot-restore*.sh
+   ```
+
+3. check the once-per-boot marker. It is a tmpfs file and should disappear
+   after a reboot:
+
+   ```bash
+   ls -l /run/alt-shift-ime-boot-hook
+   ```
+
+4. reinstall if any file is missing. Then run the manual fallback:
+
+   ```bash
+   bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
+   ```
+
+If `/usr/local/lib/alt-shift-ime/` is also gone, reinstall from the release
+tarball.
+
+### The daemon starts directly but never moves under Upstart
+
+Check the helper log and process state:
+
+```bash
+cat /var/log/alt-shift-ime-restore.log
+ps aux | grep -E 'alt-shift-ime|boot-restore'
+ls -ld /run/alt-shift-ime-boot-helper.lock
+```
+
+The helper waits up to 60 seconds for boot to settle and then 10 more
+seconds. If it was killed, reboot or run:
 
 ```bash
 bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
 ```
 
-If `/usr/local/lib/alt-shift-ime/` is also gone, reinstall from the release
-tarball.
+### The hook restores the daemon after uninstall
+
+The uninstaller removes the udev rule and creates
+`/usr/local/lib/alt-shift-ime/disabled`. Check that both happened:
+
+```bash
+ls -l /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
+ls -l /usr/local/lib/alt-shift-ime/disabled
+```
+
+If the rule is still present, remove it and reload udev:
+
+```bash
+rm -f /usr/local/lib/udev/rules.d/99-alt-shift-ime.rules
+udevadm control --reload-rules
+```
 
 ## SELinux AVC denials
 

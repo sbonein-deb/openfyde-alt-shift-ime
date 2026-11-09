@@ -50,13 +50,15 @@
 - Срабатывание после отпускания модификаторов, задержка 80 мс по умолчанию.
 - Штатный `Search+Space` не ломается.
 - Наблюдение за всеми клавиатурами, которые объявляют левые Alt и Shift.
-- Внешние USB-клавиатуры подхватываются на лету, без перезапуска.
+- Внешние USB-клавиатуры подхватываются на лету, без перезапуска (проверено
+  на физическом железе).
 - Single-instance `flock`: второй демон или `selftest` не запустится.
 - При отключении клавиатуры состояние детектора сбрасывается, отложенный
   инжект отменяется.
 - Статический Go-бинарник для `amd64` и `arm64`, без runtime-зависимостей.
 - Диагностические команды: `probe`, `inject`, `selftest`.
-- Upstart-job, installer, restore после обновления и uninstall.
+- Upstart-job, installer, автоматическое восстановление после обновления и
+  uninstall.
 
 ## Требования
 
@@ -75,13 +77,13 @@
 
 ```bash
 cd /tmp
-curl -fsSLO https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/download/v0.2.0/alt-shift-ime_0.2.0_linux_amd64.tar.gz
-curl -fsSLO https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/download/v0.2.0/checksums.txt
+curl -fsSLO https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/download/v0.3.0/alt-shift-ime_0.3.0_linux_amd64.tar.gz
+curl -fsSLO https://github.com/sbonein-deb/openfyde-alt-shift-ime/releases/download/v0.3.0/checksums.txt
 sha256sum -c checksums.txt --ignore-missing
 
 rm -rf /tmp/alt-shift-ime-install
 mkdir -p /tmp/alt-shift-ime-install
-tar xzf alt-shift-ime_0.2.0_linux_amd64.tar.gz -C /tmp/alt-shift-ime-install --strip-components=1
+tar xzf alt-shift-ime_0.3.0_linux_amd64.tar.gz -C /tmp/alt-shift-ime-install --strip-components=1
 bash /tmp/alt-shift-ime-install/setup-alt-shift-ime.sh
 ```
 
@@ -94,8 +96,9 @@ Installer:
 - ставит `/usr/local/bin/alt-shift-ime`;
 - ставит `/usr/local/etc/alt-shift-ime.conf`, если конфига ещё нет;
 - ставит Upstart-job `/etc/init/alt-shift-ime.conf`;
-- сохраняет restore-копии в `/usr/local/lib/alt-shift-ime/`;
-- перезагружает Upstart и запускает демон.
+- ставит udev-правило `/usr/local/lib/udev/rules.d/99-alt-shift-ime.rules`;
+- сохраняет restore- и boot-recovery-копии в `/usr/local/lib/alt-shift-ime/`;
+- перезагружает udev и Upstart, затем запускает демон.
 
 Повторный запуск безопасен.
 
@@ -113,7 +116,7 @@ tail -n 20 /var/log/alt-shift-ime.log
 Здоровый старт выглядит так:
 
 ```
-alt-shift-ime 0.2.0 starting: combo=ctrl+space delay=80ms rescan=2s dry_run=false verbose=false
+alt-shift-ime 0.3.0 starting: combo=ctrl+space delay=80ms rescan=2s dry_run=false verbose=false
 config: /usr/local/etc/alt-shift-ime.conf
 lock acquired: /run/alt-shift-ime.lock
 created "alt-shift-ime virtual keyboard", warming up 700ms
@@ -185,7 +188,26 @@ ChromeOS, ещё до отладки детектора. `selftest` — foregrou
 
 Обновление ChromeOS заменяет root-раздел, поэтому
 `/etc/init/alt-shift-ime.conf` исчезает. `/usr/local` лежит на stateful-разделе
-и переживает обновление. Восстановите job:
+и переживает обновление.
+
+Восстановление автоматическое. Установленное udev-правило в
+`/usr/local/lib/udev/rules.d/` запускает `boot-restore.sh` во время штатного
+boot-триггера устройств. Если Upstart-job отсутствует, хук:
+
+1. запускает демон напрямую из `/usr/local/bin`;
+2. ждёт завершения загрузки и ставит Upstart-job для следующей загрузки;
+3. останавливает напрямую запущенный демон и запускает его под Upstart.
+
+Ручные действия и дополнительная перезагрузка не нужны. Хук срабатывает не
+более одного раза за загрузку и ничего не делает, если job уже существует.
+
+Лог автоматического восстановления:
+
+```bash
+cat /var/log/alt-shift-ime-restore.log
+```
+
+Ручной fallback, если хук не сработал:
 
 ```bash
 bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
@@ -200,8 +222,9 @@ bash /usr/local/lib/alt-shift-ime/restore-alt-shift-ime.sh
 bash /usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh
 ```
 
-Останавливает демон, удаляет бинарник и Upstart-job, сохраняя конфиг и
-restore-копии. С `--purge` удаляется всё:
+Останавливает демон, удаляет бинарник, Upstart-job и udev-правило, а также
+оставляет маркер `disabled`, чтобы автоматическое восстановление не вернуло
+job. Конфиг и restore-копии сохраняются. С `--purge` удаляется всё:
 
 ```bash
 bash /usr/local/lib/alt-shift-ime/uninstall-alt-shift-ime.sh --purge
@@ -225,7 +248,7 @@ ARCH=arm64 OUT=dist/alt-shift-ime-arm64 ./scripts/build.sh
 Создать release-tarball и checksums:
 
 ```bash
-./scripts/package.sh v0.2.0
+./scripts/package.sh v0.3.0
 ls dist/release/
 ```
 
@@ -259,12 +282,10 @@ English versions: [docs/INSTALL.md](docs/INSTALL.md),
 - Поддерживается только загрузка OpenFyde/ChromeOS на Upstart. Systemd-unit
   нет.
 - Правые Alt и Shift намеренно игнорируются.
-- Hotplug внешней клавиатуры реализован и покрыт тестами на уровне
-  детектора/устройств, но на момент первого релиза не проверялся на реальном
-  внешнем железе.
 - Имена клавиш в `combo` — это позиционные evdev-коды, а не символы,
   зависящие от раскладки.
-- После обновления ChromeOS нужно запустить restore-скрипт (или переустановить).
+- Автоматическое восстановление рассчитывает на то, что `/usr/local` переживает
+  обновление. Если он тоже потерян, переустановите из release-tarball.
 
 ## Лицензия
 

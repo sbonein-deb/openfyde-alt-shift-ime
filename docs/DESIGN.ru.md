@@ -175,10 +175,47 @@ ChromeOS монтирует `/` read-only. Installer перемонтирует 
 
 - бинарник и конфиг;
 - Upstart-job как `alt-shift-ime.upstart.conf`;
-- скрипты setup, restore и uninstall
+- скрипты setup, restore, boot-recovery и uninstall
 
 в `/usr/local/lib/alt-shift-ime/`. `restore-alt-shift-ime.sh` копирует job
 обратно в `/etc/init`, перезагружает Upstart и запускает демон.
+
+## Автоматическое восстановление после обновления
+
+Запускать restore-скрипт вручную легко забыть. Поэтому installer также пишет
+`/usr/local/lib/udev/rules.d/99-alt-shift-ime.rules`. udev 249 читает этот
+каталог (`CONF_PATHS` включает `/usr/local/lib/udev/rules.d`), а домен
+`cros_udevd` на проверенной сборке permissive, так что правило работает без
+изменения `/etc/udev` и подписанного root-раздела.
+
+Правило запускает `boot-restore.sh` на `add`-события block-устройств и input
+event-узлов. Input-события также покрывают клавиатуру, подключённую после
+загрузки. Хук идемпотентен:
+
+1. `/run/alt-shift-ime-boot-hook` заставляет его сработать не более одного раза
+   за загрузку. `/run` — tmpfs, поэтому маркер исчезает при перезагрузке.
+2. Если `/etc/init/alt-shift-ime.conf` существует, job'ом владеет Upstart; хук
+   только пишет маркер.
+3. Если установка отключена (`/usr/local/lib/alt-shift-ime/disabled`), он
+   выходит.
+4. Иначе он запускает демон напрямую с теми же аргументами, что и Upstart-job,
+   и запускает `boot-restore-late.sh` в фоне.
+
+Block-триггер может выполниться до того, как `/var` станет writable. Поэтому хук
+проверяет `-w /var/log` и выходит; более поздние input/block-события после
+`boot-services` запустят его снова. Демон к тому же повторяет попытки открыть
+`/dev/uinput` до 300 секунд, так что запуск до загрузки модуля `uinput.conf`
+безопасен.
+
+`boot-restore-late.sh` ждёт завершения загрузки, ставит job через
+`restore-alt-shift-ime.sh --install-only`, перезагружает Upstart, останавливает
+напрямую запущенный демон (PID из `/run/alt-shift-ime.lock`, с проверкой
+`/proc/<pid>/cmdline`) и запускает `alt-shift-ime` под Upstart. Следующие
+загрузки используют обычный job.
+
+Uninstaller удаляет udev-правило и создаёт sentinel `disabled` до остановки
+чего-либо, чтобы уже запущенный recovery-helper не восстановил job во время
+удаления.
 
 ## SELinux и noexec
 
@@ -209,5 +246,4 @@ ChromeOS монтирует `/` read-only. Installer перемонтирует 
 - Ручные хостовые тесты инжекта, `Search+Space`, `Alt+Shift+Tab`, AVC,
   переживания reboot, restore и uninstall.
 
-Hotplug внешней USB-клавиатуры реализован и покрыт на уровне определения
-устройств, но первый релиз готовился без физического внешнего железа.
+Hotplug внешней USB-клавиатуры проверен на физическом железе.

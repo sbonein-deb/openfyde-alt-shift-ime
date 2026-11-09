@@ -177,10 +177,46 @@ ChromeOS mounts `/` read-only. The installer remounts it read-write, installs
 
 - the binary and config;
 - the Upstart job as `alt-shift-ime.upstart.conf`;
-- the setup, restore and uninstall scripts
+- the setup, restore, boot-recovery and uninstall scripts
 
 under `/usr/local/lib/alt-shift-ime/`. `restore-alt-shift-ime.sh` copies the
 job back into `/etc/init`, reloads Upstart and starts the daemon.
+
+## Automatic recovery after an update
+
+Running the restore script by hand is easy to forget. The installer also writes
+`/usr/local/lib/udev/rules.d/99-alt-shift-ime.rules`. udev 249 reads that
+directory (`CONF_PATHS` includes `/usr/local/lib/udev/rules.d`), and the
+`cros_udevd` domain is permissive on the tested build, so the rule works without
+touching `/etc/udev` or the signed root filesystem.
+
+The rule runs `boot-restore.sh` for `add` events on block devices and input
+event nodes. Input events also cover a keyboard plugged in after boot. The hook
+is idempotent:
+
+1. `/run/alt-shift-ime-boot-hook` makes it act at most once per boot. `/run` is
+   a tmpfs, so the marker disappears on reboot.
+2. If `/etc/init/alt-shift-ime.conf` exists, Upstart owns the job; the hook only
+   writes the marker.
+3. If the install is disabled (`/usr/local/lib/alt-shift-ime/disabled`), it
+   exits.
+4. Otherwise it starts the daemon directly with the same arguments as the
+   Upstart job and launches `boot-restore-late.sh` in the background.
+
+The block-device trigger may run before `/var` is writable. The hook therefore
+checks `-w /var/log` and returns; the later input/block events after
+`boot-services` run it again. The daemon also retries `/dev/uinput` for up to
+300 seconds, so starting before `uinput.conf` has loaded the module is safe.
+
+`boot-restore-late.sh` waits for boot to settle, installs the job with
+`restore-alt-shift-ime.sh --install-only`, reloads Upstart, stops the directly
+started daemon (PID from `/run/alt-shift-ime.lock`, verified against
+`/proc/<pid>/cmdline`) and starts `alt-shift-ime` under Upstart. From then on the
+next boots use the normal job.
+
+The uninstaller removes the udev rule and creates the `disabled` sentinel before
+stopping anything, so a recovery helper that is already running cannot
+reinstall the job during uninstall.
 
 ## SELinux and noexec
 
